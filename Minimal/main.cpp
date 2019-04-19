@@ -774,12 +774,21 @@ class ColorCubeScene {
   std::unique_ptr<Cube> cube;
   vector<Model*> modelArr;
   Model * sphere;
+  Model * target;
   GLfloat dis = 0.14f;
   int size = 125;
 
   GLuint uProjection, uModelview,model;
 
+  float Xpos = -0.5f;
+  float Ypos = 0.0f;
+  float Zpos = -5.0f;
 
+  const float time = 0.01f;
+
+  bool select = false;
+
+  vec3 targetPos;
 
   const unsigned int GRID_SIZE{5};
 
@@ -796,8 +805,11 @@ public:
 	highlightShader = LoadShaders(HAND_VERT, HIGHLIGHT_FRAG);
     // Cube
     cube = std::make_unique<Cube>();
-	//sphere
+	// sphere
 	sphere = new Model("sphere.obj");
+
+	// target
+	target = new Model("sphere.obj");
 	if (sphere) {
 		std::cout << "sphere successfully loaded" << std::endl;
 	}
@@ -806,6 +818,9 @@ public:
 		Model* modelEle = new Model("sphere.obj");
 		modelArr.push_back(modelEle);
 	}
+
+	targetPos = vec3(Xpos, Ypos, Zpos);
+
   }
   ~ColorCubeScene() {
 	  delete(sphere);
@@ -814,7 +829,7 @@ public:
 	  glDeleteProgram(highlightShader);
   }
 
-  void render(const glm::mat4& projection, const glm::mat4& view) {
+  void render(const glm::mat4& projection, const glm::mat4& view, ovrSession _session) {
 	  glm::mat4 inverse = glm::translate(glm::mat4(1.0f), -handPos);
 	  glm::mat4 T = glm::translate(glm::mat4(1.0f), handPos);
 	  glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.14f, 0.14f, 0.14f));
@@ -829,12 +844,132 @@ public:
 	  glUniformMatrix4fv(uModelview, 1, GL_FALSE, &view[0][0]);
 	  glUniformMatrix4fv(model, 1, GL_FALSE, &modelMatrix[0][0]);
 	  sphere->Draw(highlightShader);
-	  drawMtx(highlightShader, handShader, projection, view);
+
+
+
+	  beatbox(handShader, projection, view, _session);
+	  //drawMtx(highlightShader, handShader, projection, view);
+	  
+	  
 	  /*
     for (int i = 0; i < instanceCount; i++) {
       sphere->toWorld = instance_positions[i] * glm::scale(glm::mat4(1.0f), glm::vec3(0.14f));
       sphere->draw(highlightShader, projection, view);
     }*/
+  }
+
+  void beatbox(GLuint handShader, glm::mat4 projection, glm::mat4 view, ovrSession _session) {
+
+	  if (start) {
+
+		  ovrInputState inputState;
+		  // Query Touch controllers. Query their parameters:
+		  double displayMidpointSeconds = ovr_GetPredictedDisplayTime(_session, 0);
+		  ovrTrackingState trackState = ovr_GetTrackingState(_session, displayMidpointSeconds, ovrTrue);
+
+		  // Process controller status. Useful to know if controller is being used at all, and if the cameras can see it. 
+		  // Bits reported:
+		  // Bit 1: ovrStatus_OrientationTracked  = Orientation is currently tracked (connected and in use)
+		  // Bit 2: ovrStatus_PositionTracked     = Position is currently tracked (false if out of range)
+		  unsigned int handStatus[2];
+		  handStatus[0] = trackState.HandStatusFlags[0];
+		  handStatus[1] = trackState.HandStatusFlags[1];
+		  // Display status for debug purposes:
+		  //std::cerr << "handStatus[left]  = " << handStatus[ovrHand_Left] << std::endl;
+		  //std::cerr << "handStatus[right] = " << handStatus[ovrHand_Right] << std::endl;
+
+		  // Process controller position and orientation:
+		  ovrPosef handPoses[2];  // These are position and orientation in meters in room coordinates, relative to tracking origin. Right-handed cartesian coordinates.
+									// ovrQuatf     Orientation;
+									// ovrVector3f  Position;
+		  handPoses[0] = trackState.HandPoses[0].ThePose;
+		  handPoses[1] = trackState.HandPoses[1].ThePose;
+		  ovrVector3f handPosition[2];
+		  handPosition[0] = handPoses[0].Position;
+		  handPosition[1] = handPoses[1].Position;
+		  handPos.x = handPosition[ovrHand_Left].x;
+		  handPos.y = handPosition[ovrHand_Left].y;
+		  handPos.z = handPosition[ovrHand_Left].z;
+
+		  //hand
+		  glUseProgram(handShader);
+		  uProjection = glGetUniformLocation(handShader, "projection");
+		  uModelview = glGetUniformLocation(handShader, "view");
+
+		  // Now send these values to the shader program
+		  glUniformMatrix4fv(uProjection, 1, GL_FALSE, &projection[0][0]);
+		  glUniformMatrix4fv(uModelview, 1, GL_FALSE, &view[0][0]);
+
+		  if (OVR_SUCCESS(ovr_GetInputState(_session, ovrControllerType_Touch, &inputState)))
+		  {
+			  if (inputState.IndexTrigger[ovrHand_Left] > 0.5f)
+			  {
+				  //std::cerr << "left hand position  = " << handPosition[ovrHand_Left].x << ", " << handPosition[ovrHand_Left].y << ", " << handPosition[ovrHand_Left].z << std::endl;
+				  std::cerr << "distant claculation: " << glm::distance(handPos, targetPos) << std::endl;
+				  float distant = glm::distance(handPos, targetPos);
+				  if (distant <= 0.4f) {
+
+					  // changing color of the selected target
+					  GLuint uColor = glGetUniformLocation(handShader, "colorValue");
+					  vec3 highlight = vec3(0.0f, 1.0f, 0.0f);
+					  glUniform3fv(uColor, 1, &highlight[0]);
+
+					  select = true;
+
+					  
+				  }
+				  else {
+					  // changing color of the selected target
+					  GLuint uColor = glGetUniformLocation(handShader, "colorValue");
+					  vec3 highlight = vec3(1.0f, 0.0f, 0.0f);
+					  glUniform3fv(uColor, 1, &highlight[0]);
+				  }
+			  }
+			  if (inputState.IndexTrigger[ovrHand_Left] <= 0.5f)
+			  {
+				  if (select) {
+					  targetPos.x = -0.5 + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (1.0)));
+					  targetPos.y = -0.5 + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (1.0)));
+					  targetPos.z = Zpos;
+					  select = false;
+				  }
+
+				  // changing color of the selected target
+				  GLuint uColor = glGetUniformLocation(handShader, "colorValue");
+				  vec3 highlight = vec3(1.0f, 0.0f, 0.0f);
+				  glUniform3fv(uColor, 1, &highlight[0]);
+			  }
+		  }
+		  
+
+		  model = glGetUniformLocation(handShader, "model");
+		  if (targetPos.z >= 0.0f) {
+			  targetPos.x = -0.5 + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (1.0)));
+			  targetPos.y = -0.5 + static_cast <float> (rand()) / (static_cast <float> (RAND_MAX / (1.0)));
+			  targetPos.z = Zpos;
+		  }
+		  else if(!select){
+			  targetPos.z = targetPos.z + time;
+		  }
+
+		  
+		  vec3 relativePosition = targetPos;
+		  glm::mat4 relativeMtx = glm::translate(glm::mat4(1.0f), relativePosition);
+		  glm::mat4 inverse = glm::translate(glm::mat4(1.0f), -relativePosition);
+		  glm::mat4 T = glm::translate(glm::mat4(1.0f), relativePosition);
+		  glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.5f, 0.5f, 0.5f));
+		  glm::mat4 newModelMtx = T * scale * inverse;
+
+		  glUseProgram(handShader);
+		  uProjection = glGetUniformLocation(handShader, "projection");
+		  uModelview = glGetUniformLocation(handShader, "view");
+		  model = glGetUniformLocation(handShader, "model");
+		  // Now send these values to the shader program
+		  glUniformMatrix4fv(uProjection, 1, GL_FALSE, &projection[0][0]);
+		  glUniformMatrix4fv(uModelview, 1, GL_FALSE, &view[0][0]);
+		  glUniformMatrix4fv(model, 1, GL_FALSE, &newModelMtx[0][0]);
+		  target->Draw(handShader);
+	  }
   }
 
   void drawMtx(GLuint highlightShader,GLuint handShader,glm::mat4 projection, glm::mat4 view) {
@@ -932,7 +1067,7 @@ protected:
   }
 
   void renderScene(const glm::mat4& projection, const glm::mat4& headPose) override {
-    cubeScene->render(projection, glm::inverse(headPose));
+    cubeScene->render(projection, glm::inverse(headPose), _session);
   }
 };
 
